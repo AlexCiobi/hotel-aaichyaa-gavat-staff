@@ -1,25 +1,35 @@
 {
   "expo": {
-    "name": "hotel-aaichyaa-gavat-staff",
+    "name": "Hotel Aaichyaa Staff",
     "slug": "hotel-aaichyaa-gavat-staff",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "scheme": "aaichyaa-staff",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#C0272D"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.aaichyaagavat.staff"
     },
     "android": {
+      "package": "com.aaichyaagavat.staff",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#C0272D",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-splash-screen"
+    ]
   }
 }
