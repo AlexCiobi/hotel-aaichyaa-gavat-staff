@@ -39,7 +39,7 @@ export default function KitchenDisplay() {
     const [{ data: o }, { data: t }] = await Promise.all([
       supabase.from('orders').select('*')
         .in('order_status', ['placed', 'confirmed', 'preparing', 'ready'])
-        .order('created_at', { ascending: true }),
+        .order('created_at', { ascending: false }),
       supabase.from('restaurant_tables').select('id, table_number'),
     ]);
     setOrders(o ?? []);
@@ -122,7 +122,7 @@ export default function KitchenDisplay() {
       </View>
 
       {/* Filters */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.filterRow}>
+      <View style={st.filterRow}>
         <TouchableOpacity onPress={() => setFilter('all')} style={[st.filterBtn, filter === 'all' && st.filterBtnActive]}>
           <Text style={[st.filterText, filter === 'all' && st.filterTextActive]}>All ({orders.length})</Text>
         </TouchableOpacity>
@@ -135,7 +135,7 @@ export default function KitchenDisplay() {
         <TouchableOpacity onPress={() => setFilter('ready')} style={[st.filterBtn, filter === 'ready' && { backgroundColor: 'rgba(34,197,94,0.15)' }]}>
           <Text style={[st.filterText, filter === 'ready' && { color: COLORS.green }]}>Ready ({counts.ready})</Text>
         </TouchableOpacity>
-      </ScrollView>
+      </View>
 
       {/* Orders */}
       <ScrollView
@@ -224,10 +224,10 @@ const st = StyleSheet.create({
   headerSub: { color: COLORS.textMuted, fontSize: 10, fontFamily: 'Inter_400Regular' },
   logoutText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
 
-  filterRow: { paddingHorizontal: 16, paddingVertical: 10, gap: 6 },
-  filterBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)' },
+  filterRow: { flexDirection: 'row' as const, paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
+  filterBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)', alignItems: 'center' as const, justifyContent: 'center' as const },
   filterBtnActive: { backgroundColor: 'rgba(255,255,255,0.1)' },
-  filterText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_700Bold' },
+  filterText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   filterTextActive: { color: '#fff' },
 
   grid: { padding: 12, paddingBottom: 40, gap: 10 },
