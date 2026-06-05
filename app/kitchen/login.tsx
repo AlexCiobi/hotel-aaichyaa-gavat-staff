@@ -25,7 +25,9 @@ export default function KitchenLogin() {
         </TouchableOpacity>
 
         <View style={styles.header}>
-          <Text style={styles.emoji}>👨‍🍳</Text>
+          <View style={styles.iconWrap}>
+            <Text style={{ fontSize: 36 }}>👨‍🍳</Text>
+          </View>
           <Text style={styles.title}>Kitchen Display</Text>
           <Text style={styles.subtitle}>Hotel Aaichyaa Gavat</Text>
         </View>
@@ -64,31 +66,25 @@ const styles = StyleSheet.create({
   back: { position: 'absolute', top: 16, left: 0 },
   backText: { color: COLORS.textMuted, fontSize: 14, fontFamily: 'Inter_400Regular' },
   header: { alignItems: 'center', marginBottom: 40 },
-  emoji: { fontSize: 44, marginBottom: 12 },
-  title: { color: '#fff', fontSize: 22, fontFamily: 'Inter_700Bold' },
+  iconWrap: { width: 72, height: 72, borderRadius: 20, backgroundColor: 'rgba(249,115,22,0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  title: { color: COLORS.text, fontSize: 22, fontFamily: 'Inter_700Bold' },
   subtitle: { color: COLORS.textMuted, fontSize: 12, marginTop: 4, fontFamily: 'Inter_400Regular' },
   form: { gap: 16 },
   label: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 1, marginBottom: 8 },
   input: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: COLORS.inputBg,
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: '#fff',
+    color: COLORS.text,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: COLORS.border,
     fontFamily: 'Inter_400Regular',
   },
   pinInput: { textAlign: 'center', letterSpacing: 8, fontSize: 22 },
-  errorBox: { backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 10, padding: 12 },
+  errorBox: { backgroundColor: 'rgba(239,68,68,0.08)', borderRadius: 10, padding: 12 },
   errorText: { color: COLORS.red, fontSize: 13, textAlign: 'center', fontFamily: 'Inter_600SemiBold' },
-  button: {
-    backgroundColor: COLORS.crimson,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
+  button: { backgroundColor: '#F97316', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   buttonText: { color: '#fff', fontSize: 16, fontFamily: 'Inter_700Bold' },
 });

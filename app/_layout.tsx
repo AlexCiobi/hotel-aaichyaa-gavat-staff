@@ -23,13 +23,15 @@ export default function RootLayout() {
 
   return (
     <>
-      <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0F0F0F' } }}>
+      <StatusBar style="dark" />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#F8F9FA' } }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="waiter/login" />
         <Stack.Screen name="waiter/portal" />
         <Stack.Screen name="kitchen/login" />
         <Stack.Screen name="kitchen/display" />
+        <Stack.Screen name="admin/login" />
+        <Stack.Screen name="admin/panel" />
       </Stack>
     </>
   );

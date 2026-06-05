@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, RefreshControl,
 } from 'react-native';
@@ -7,13 +7,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { COLORS } from '../../lib/colors';
+import { playKitchenNotification, unloadSounds } from '../../lib/sounds';
 import type { OrderRecord } from '../../lib/types';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; next: string | null; btnLabel: string; btnColor: string }> = {
-  placed: { label: 'NEW', color: COLORS.blue, bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.25)', next: 'preparing', btnLabel: 'Start Cooking', btnColor: COLORS.crimson },
-  confirmed: { label: 'CONFIRMED', color: COLORS.purple, bg: 'rgba(168,85,247,0.08)', border: 'rgba(168,85,247,0.25)', next: 'preparing', btnLabel: 'Start Cooking', btnColor: COLORS.crimson },
-  preparing: { label: 'COOKING', color: COLORS.yellow, bg: 'rgba(234,179,8,0.08)', border: 'rgba(234,179,8,0.25)', next: 'ready', btnLabel: 'Mark Ready', btnColor: COLORS.green },
-  ready: { label: 'READY', color: COLORS.green, bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.25)', next: 'delivered', btnLabel: 'Mark Delivered', btnColor: '#059669' },
+  placed: { label: 'NEW', color: '#2563EB', bg: 'rgba(59,130,246,0.06)', border: 'rgba(59,130,246,0.2)', next: 'preparing', btnLabel: 'Start Cooking', btnColor: COLORS.crimson },
+  confirmed: { label: 'CONFIRMED', color: '#7C3AED', bg: 'rgba(168,85,247,0.06)', border: 'rgba(168,85,247,0.2)', next: 'preparing', btnLabel: 'Start Cooking', btnColor: COLORS.crimson },
+  preparing: { label: 'COOKING', color: '#B8860B', bg: 'rgba(234,179,8,0.06)', border: 'rgba(234,179,8,0.2)', next: 'ready', btnLabel: 'Mark Ready', btnColor: '#16A34A' },
+  ready: { label: 'READY', color: '#16A34A', bg: 'rgba(34,197,94,0.06)', border: 'rgba(34,197,94,0.2)', next: 'delivered', btnLabel: 'Mark Delivered', btnColor: '#059669' },
 };
 
 interface TableMap { [id: string]: string }
@@ -54,13 +55,20 @@ export default function KitchenDisplay() {
     fetchAll();
   }, [fetchAll]);
 
-  // Real-time
+  // Real-time with sound notification on new orders
+  const orderCountRef = useRef(0);
+  useEffect(() => { orderCountRef.current = orders.length; }, [orders.length]);
+
   useEffect(() => {
     const ch = supabase
       .channel('kitchen-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchAll())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, () => {
+        playKitchenNotification();
+        fetchAll();
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, () => fetchAll())
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => { supabase.removeChannel(ch); unloadSounds(); };
   }, [fetchAll]);
 
   // Tick timer every 30s
@@ -126,14 +134,14 @@ export default function KitchenDisplay() {
         <TouchableOpacity onPress={() => setFilter('all')} style={[st.filterBtn, filter === 'all' && st.filterBtnActive]}>
           <Text style={[st.filterText, filter === 'all' && st.filterTextActive]}>All ({orders.length})</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setFilter('placed')} style={[st.filterBtn, filter === 'placed' && { backgroundColor: 'rgba(59,130,246,0.15)' }]}>
-          <Text style={[st.filterText, filter === 'placed' && { color: COLORS.blue }]}>New ({counts.new})</Text>
+        <TouchableOpacity onPress={() => setFilter('placed')} style={[st.filterBtn, filter === 'placed' && { backgroundColor: 'rgba(59,130,246,0.1)' }]}>
+          <Text style={[st.filterText, filter === 'placed' && { color: '#2563EB' }]}>New ({counts.new})</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setFilter('preparing')} style={[st.filterBtn, filter === 'preparing' && { backgroundColor: 'rgba(234,179,8,0.15)' }]}>
-          <Text style={[st.filterText, filter === 'preparing' && { color: COLORS.yellow }]}>Cooking ({counts.cooking})</Text>
+        <TouchableOpacity onPress={() => setFilter('preparing')} style={[st.filterBtn, filter === 'preparing' && { backgroundColor: 'rgba(234,179,8,0.1)' }]}>
+          <Text style={[st.filterText, filter === 'preparing' && { color: '#B8860B' }]}>Cooking ({counts.cooking})</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setFilter('ready')} style={[st.filterBtn, filter === 'ready' && { backgroundColor: 'rgba(34,197,94,0.15)' }]}>
-          <Text style={[st.filterText, filter === 'ready' && { color: COLORS.green }]}>Ready ({counts.ready})</Text>
+        <TouchableOpacity onPress={() => setFilter('ready')} style={[st.filterBtn, filter === 'ready' && { backgroundColor: 'rgba(34,197,94,0.1)' }]}>
+          <Text style={[st.filterText, filter === 'ready' && { color: '#16A34A' }]}>Ready ({counts.ready})</Text>
         </TouchableOpacity>
       </View>
 
@@ -216,44 +224,44 @@ export default function KitchenDisplay() {
 }
 
 const st = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#050505' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#EEEEEE', backgroundColor: '#FFFFFF' },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: COLORS.crimson, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold' },
-  headerSub: { color: COLORS.textMuted, fontSize: 10, fontFamily: 'Inter_400Regular' },
-  logoutText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  headerIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#F97316', alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: '#1A1A1A', fontSize: 15, fontFamily: 'Inter_700Bold' },
+  headerSub: { color: '#999999', fontSize: 10, fontFamily: 'Inter_400Regular' },
+  logoutText: { color: '#999999', fontSize: 12, fontFamily: 'Inter_600SemiBold' },
 
-  filterRow: { flexDirection: 'row' as const, paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
-  filterBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)', alignItems: 'center' as const, justifyContent: 'center' as const },
-  filterBtnActive: { backgroundColor: 'rgba(255,255,255,0.1)' },
-  filterText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-  filterTextActive: { color: '#fff' },
+  filterRow: { flexDirection: 'row' as const, paddingHorizontal: 12, paddingVertical: 10, gap: 6, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#EEEEEE' },
+  filterBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, backgroundColor: '#F5F5F5', alignItems: 'center' as const, justifyContent: 'center' as const },
+  filterBtnActive: { backgroundColor: '#E8E8E8' },
+  filterText: { color: '#999999', fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  filterTextActive: { color: '#1A1A1A' },
 
   grid: { padding: 12, paddingBottom: 40, gap: 10 },
   empty: { alignItems: 'center', paddingVertical: 80 },
-  emptyTitle: { color: 'rgba(255,255,255,0.2)', fontSize: 16, fontFamily: 'Inter_700Bold' },
-  emptyText: { color: 'rgba(255,255,255,0.1)', fontSize: 13, marginTop: 4, fontFamily: 'Inter_400Regular' },
+  emptyTitle: { color: '#CCCCCC', fontSize: 16, fontFamily: 'Inter_700Bold' },
+  emptyText: { color: '#DDDDDD', fontSize: 13, marginTop: 4, fontFamily: 'Inter_400Regular' },
 
-  card: { borderRadius: 18, borderWidth: 2, padding: 16 },
+  card: { borderRadius: 18, borderWidth: 1.5, padding: 16, backgroundColor: '#FFFFFF' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   cardHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cardOrderNum: { color: '#fff', fontSize: 16, fontFamily: 'Inter_700Bold' },
-  tablePill: { backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
-  tablePillText: { color: 'rgba(255,255,255,0.5)', fontSize: 10, fontFamily: 'Inter_700Bold' },
-  cardTime: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_700Bold' },
+  cardOrderNum: { color: '#1A1A1A', fontSize: 16, fontFamily: 'Inter_700Bold' },
+  tablePill: { backgroundColor: '#F5F5F5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
+  tablePillText: { color: '#666666', fontSize: 10, fontFamily: 'Inter_700Bold' },
+  cardTime: { color: '#999999', fontSize: 12, fontFamily: 'Inter_700Bold' },
 
   statusLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
-  orderType: { color: COLORS.textMuted, fontSize: 10, textTransform: 'capitalize', marginBottom: 10, fontFamily: 'Inter_400Regular' },
+  orderType: { color: '#999999', fontSize: 10, textTransform: 'capitalize', marginBottom: 10, fontFamily: 'Inter_400Regular' },
 
   itemsList: { gap: 6, marginBottom: 10 },
   itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  itemQtyBadge: { width: 26, height: 26, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
-  itemQtyText: { color: '#fff', fontSize: 12, fontFamily: 'Inter_700Bold' },
-  itemName: { color: '#fff', fontSize: 14, fontFamily: 'Inter_600SemiBold', flex: 1 },
+  itemQtyBadge: { width: 26, height: 26, borderRadius: 8, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
+  itemQtyText: { color: '#1A1A1A', fontSize: 12, fontFamily: 'Inter_700Bold' },
+  itemName: { color: '#333333', fontSize: 14, fontFamily: 'Inter_600SemiBold', flex: 1 },
 
-  noteBox: { backgroundColor: 'rgba(234,179,8,0.06)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(234,179,8,0.1)', marginBottom: 10 },
-  noteText: { color: 'rgba(234,179,8,0.7)', fontSize: 11, fontFamily: 'Inter_400Regular' },
+  noteBox: { backgroundColor: 'rgba(234,179,8,0.06)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(234,179,8,0.15)', marginBottom: 10 },
+  noteText: { color: 'rgba(180,140,8,0.8)', fontSize: 11, fontFamily: 'Inter_400Regular' },
 
   actionBtn: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   actionBtnText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_700Bold' },

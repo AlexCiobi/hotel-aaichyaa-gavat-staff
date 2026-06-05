@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, ActivityIndicator, Alert, FlatList,
@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { COLORS } from '../../lib/colors';
+import { playWaiterNotification, unloadSounds } from '../../lib/sounds';
 import type { RestaurantTable, MenuItem, CartItem, OrderRecord } from '../../lib/types';
 
 const CATEGORIES = [
@@ -23,12 +24,12 @@ const CATEGORIES = [
 
 function statusBadge(s: string) {
   const map: Record<string, { bg: string; text: string }> = {
-    placed: { bg: 'rgba(59,130,246,0.15)', text: COLORS.blue },
-    confirmed: { bg: 'rgba(168,85,247,0.15)', text: COLORS.purple },
-    preparing: { bg: 'rgba(234,179,8,0.15)', text: COLORS.yellow },
-    ready: { bg: 'rgba(34,197,94,0.15)', text: COLORS.green },
+    placed: { bg: 'rgba(59,130,246,0.1)', text: COLORS.blue },
+    confirmed: { bg: 'rgba(168,85,247,0.1)', text: COLORS.purple },
+    preparing: { bg: 'rgba(234,179,8,0.1)', text: '#B8860B' },
+    ready: { bg: 'rgba(34,197,94,0.1)', text: '#16A34A' },
   };
-  return map[s] ?? { bg: 'rgba(255,255,255,0.05)', text: COLORS.textMuted };
+  return map[s] ?? { bg: '#F5F5F5', text: COLORS.textMuted };
 }
 
 type TabView = 'tables' | 'menu' | 'orders';
@@ -70,13 +71,19 @@ export default function WaiterPortal() {
     fetchAll();
   }, [fetchAll]);
 
-  // Real-time
+  // Real-time with sound when order becomes ready
   useEffect(() => {
     const ch = supabase
       .channel('waiter-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchAll())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload: any) => {
+        if (payload.new?.order_status === 'ready' && payload.old?.order_status !== 'ready') {
+          playWaiterNotification();
+        }
+        fetchAll();
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, () => fetchAll())
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => { supabase.removeChannel(ch); unloadSounds(); };
   }, [fetchAll]);
 
   const filteredMenu = menuItems.filter(i => {
@@ -132,6 +139,23 @@ export default function WaiterPortal() {
     setSubmitting(false);
   };
 
+  const freeTable = (table: RestaurantTable) => {
+    Alert.alert(
+      'Free Table',
+      `Mark Table ${table.table_number} as available?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Free Table',
+          onPress: async () => {
+            await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', table.id);
+            fetchAll();
+          },
+        },
+      ]
+    );
+  };
+
   const logout = async () => {
     await AsyncStorage.removeItem('staff_waiter');
     router.replace('/waiter/login');
@@ -179,6 +203,8 @@ export default function WaiterPortal() {
               return (
                 <TouchableOpacity key={table.id}
                   onPress={() => { setSelectedTable(table); setTab('menu'); }}
+                  onLongPress={() => occ ? freeTable(table) : undefined}
+                  delayLongPress={500}
                   style={[s.tableCard, sel && s.tableCardSel, occ && s.tableCardOcc, res && s.tableCardRes]}>
                   <Text style={s.tableNum}>{table.table_number}</Text>
                   <Text style={s.tableSeats}>{table.capacity} seats</Text>
@@ -194,6 +220,9 @@ export default function WaiterPortal() {
             <View style={s.legendItem}><View style={[s.legendDot, { backgroundColor: COLORS.orange }]} /><Text style={s.legendText}>Occupied</Text></View>
             <View style={s.legendItem}><View style={[s.legendDot, { backgroundColor: COLORS.purple }]} /><Text style={s.legendText}>Reserved</Text></View>
           </View>
+          <Text style={{ color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 12, textAlign: 'center' }}>
+            Long-press an occupied table to free it
+          </Text>
         </ScrollView>
       )}
 
@@ -257,7 +286,7 @@ export default function WaiterPortal() {
                           </TouchableOpacity>
                           <Text style={s.qtyNum}>{inCart.quantity}</Text>
                           <TouchableOpacity onPress={() => updateQty(item.id, 1)} style={[s.qtyBtn, s.qtyBtnAdd]}>
-                            <Text style={s.qtyBtnText}>+</Text>
+                            <Text style={[s.qtyBtnText, { color: '#fff' }]}>+</Text>
                           </TouchableOpacity>
                         </View>
                       ) : (
@@ -364,29 +393,29 @@ export default function WaiterPortal() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: COLORS.card },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   headerDot: { width: 36, height: 36, borderRadius: 10, backgroundColor: COLORS.crimson },
-  headerTitle: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold' },
+  headerTitle: { color: COLORS.text, fontSize: 15, fontFamily: 'Inter_700Bold' },
   headerSub: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_400Regular' },
   logoutText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
 
-  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: COLORS.card },
   tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
   tabActive: { borderBottomWidth: 2, borderBottomColor: COLORS.crimson },
   tabText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold', textTransform: 'uppercase', letterSpacing: 0.5 },
   tabTextActive: { color: COLORS.crimson },
 
   content: { padding: 16, paddingBottom: 100 },
-  sectionTitle: { color: '#fff', fontSize: 18, fontFamily: 'Inter_700Bold', marginBottom: 16 },
+  sectionTitle: { color: COLORS.text, fontSize: 18, fontFamily: 'Inter_700Bold', marginBottom: 16 },
 
   // Tables
   tableGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  tableCard: { width: '23%' as any, aspectRatio: 1, borderRadius: 14, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.02)', alignItems: 'center', justifyContent: 'center', gap: 2 },
-  tableCardSel: { borderColor: COLORS.crimson, backgroundColor: 'rgba(192,39,45,0.1)' },
-  tableCardOcc: { borderColor: 'rgba(249,115,22,0.3)', backgroundColor: 'rgba(249,115,22,0.05)' },
-  tableCardRes: { borderColor: 'rgba(168,85,247,0.3)', backgroundColor: 'rgba(168,85,247,0.05)' },
-  tableNum: { color: '#fff', fontSize: 18, fontFamily: 'Inter_700Bold' },
+  tableCard: { width: '23%' as any, aspectRatio: 1, borderRadius: 14, borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center', gap: 2 },
+  tableCardSel: { borderColor: COLORS.crimson, backgroundColor: COLORS.crimsonLight },
+  tableCardOcc: { borderColor: 'rgba(249,115,22,0.4)', backgroundColor: 'rgba(249,115,22,0.06)' },
+  tableCardRes: { borderColor: 'rgba(168,85,247,0.4)', backgroundColor: 'rgba(168,85,247,0.06)' },
+  tableNum: { color: COLORS.text, fontSize: 18, fontFamily: 'Inter_700Bold' },
   tableSeats: { color: COLORS.textMuted, fontSize: 9, fontFamily: 'Inter_400Regular' },
   tableBadge: { color: COLORS.green, fontSize: 9, fontFamily: 'Inter_600SemiBold' },
   legend: { flexDirection: 'row', gap: 16, marginTop: 16 },
@@ -395,7 +424,7 @@ const s = StyleSheet.create({
   legendText: { color: COLORS.textMuted, fontSize: 10, fontFamily: 'Inter_400Regular' },
 
   // Menu
-  tableBanner: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, backgroundColor: 'rgba(192,39,45,0.08)', borderBottomWidth: 1, borderBottomColor: 'rgba(192,39,45,0.15)' },
+  tableBanner: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, backgroundColor: COLORS.crimsonLight, borderBottomWidth: 1, borderBottomColor: 'rgba(192,39,45,0.12)' },
   tableBannerText: { color: COLORS.crimson, fontFamily: 'Inter_700Bold', fontSize: 14 },
   tableBannerSub: { color: COLORS.textMuted, fontSize: 11, marginLeft: 8, fontFamily: 'Inter_400Regular' },
   tableBannerClose: { marginLeft: 'auto', padding: 4 },
@@ -404,41 +433,41 @@ const s = StyleSheet.create({
   noTableLink: { color: COLORS.crimson, fontSize: 14, fontFamily: 'Inter_700Bold', marginTop: 8 },
 
   searchWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
-  searchInput: { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: '#fff', fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', fontFamily: 'Inter_400Regular' },
+  searchInput: { backgroundColor: COLORS.inputBg, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: COLORS.text, fontSize: 14, borderWidth: 1, borderColor: COLORS.border, fontFamily: 'Inter_400Regular' },
 
   catRow: { paddingHorizontal: 16, paddingVertical: 8, gap: 6 },
-  catPill: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)' },
+  catPill: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, backgroundColor: COLORS.inputBg },
   catPillActive: { backgroundColor: COLORS.crimson },
   catPillText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   catPillTextActive: { color: '#fff' },
 
-  menuRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.03)' },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   vegDot: { width: 8, height: 8, borderRadius: 2 },
-  menuName: { color: '#fff', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  menuName: { color: COLORS.text, fontSize: 14, fontFamily: 'Inter_600SemiBold' },
   menuNameMr: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_400Regular' },
   menuPrice: { color: COLORS.crimson, fontSize: 14, fontFamily: 'Inter_700Bold', marginRight: 8 },
-  addBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: 'rgba(192,39,45,0.1)', borderWidth: 1, borderColor: 'rgba(192,39,45,0.2)' },
+  addBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: COLORS.crimsonLight, borderWidth: 1, borderColor: 'rgba(192,39,45,0.15)' },
   addBtnText: { color: COLORS.crimson, fontSize: 11, fontFamily: 'Inter_700Bold' },
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  qtyBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
+  qtyBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: COLORS.inputBg, alignItems: 'center', justifyContent: 'center' },
   qtyBtnAdd: { backgroundColor: COLORS.crimson },
-  qtyBtnText: { color: '#fff', fontSize: 16, fontFamily: 'Inter_700Bold' },
-  qtyNum: { color: '#fff', fontSize: 14, fontFamily: 'Inter_700Bold', minWidth: 16, textAlign: 'center' },
+  qtyBtnText: { color: COLORS.text, fontSize: 16, fontFamily: 'Inter_700Bold' },
+  qtyNum: { color: COLORS.text, fontSize: 14, fontFamily: 'Inter_700Bold', minWidth: 16, textAlign: 'center' },
 
   // Cart bar
-  cartBar: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
-  cartExpanded: { padding: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
+  cartBar: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: COLORS.card, borderTopWidth: 1, borderTopColor: COLORS.border },
+  cartExpanded: { padding: 16, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   cartRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8 },
-  cartItemName: { flex: 1, color: 'rgba(255,255,255,0.6)', fontSize: 13, fontFamily: 'Inter_400Regular' },
+  cartItemName: { flex: 1, color: COLORS.textSecondary, fontSize: 13, fontFamily: 'Inter_400Regular' },
   cartQtyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cartQtyBtn: { width: 22, height: 22, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
-  cartQtyBtnText: { color: '#fff', fontSize: 12, fontFamily: 'Inter_700Bold' },
-  cartQtyNum: { color: '#fff', fontSize: 12, fontFamily: 'Inter_700Bold', width: 14, textAlign: 'center' },
+  cartQtyBtn: { width: 22, height: 22, borderRadius: 6, backgroundColor: COLORS.inputBg, alignItems: 'center', justifyContent: 'center' },
+  cartQtyBtnText: { color: COLORS.text, fontSize: 12, fontFamily: 'Inter_700Bold' },
+  cartQtyNum: { color: COLORS.text, fontSize: 12, fontFamily: 'Inter_700Bold', width: 14, textAlign: 'center' },
   cartItemPrice: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold', width: 56, textAlign: 'right' },
-  instrInput: { backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, color: '#fff', fontSize: 12, marginTop: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', fontFamily: 'Inter_400Regular' },
+  instrInput: { backgroundColor: COLORS.inputBg, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, color: COLORS.text, fontSize: 12, marginTop: 8, borderWidth: 1, borderColor: COLORS.border, fontFamily: 'Inter_400Regular' },
   cartActions: { flexDirection: 'row', padding: 12, gap: 10 },
-  cartToggle: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center' },
-  cartToggleText: { color: '#fff', fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  cartToggle: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center' },
+  cartToggleText: { color: COLORS.text, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   sendBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: COLORS.crimson, alignItems: 'center' },
   sendBtnText: { color: '#fff', fontSize: 13, fontFamily: 'Inter_700Bold' },
 
@@ -446,18 +475,18 @@ const s = StyleSheet.create({
   ordersHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   refreshText: { color: COLORS.crimson, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   emptyText: { color: COLORS.textMuted, textAlign: 'center', paddingVertical: 40, fontSize: 14, fontFamily: 'Inter_400Regular' },
-  orderCard: { backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', padding: 14, marginBottom: 10 },
+  orderCard: { backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, padding: 14, marginBottom: 10 },
   orderTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   orderNum: { color: COLORS.crimson, fontFamily: 'Inter_700Bold', fontSize: 14 },
   orderTable: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
   statusText: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.5 },
   orderItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 },
-  orderItemText: { color: 'rgba(255,255,255,0.5)', fontSize: 12, fontFamily: 'Inter_400Regular' },
-  orderItemPrice: { color: 'rgba(255,255,255,0.3)', fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-  orderNote: { marginTop: 6, backgroundColor: 'rgba(234,179,8,0.05)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(234,179,8,0.1)' },
-  orderNoteText: { color: 'rgba(234,179,8,0.6)', fontSize: 10, fontFamily: 'Inter_400Regular' },
-  orderBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.04)' },
+  orderItemText: { color: COLORS.textSecondary, fontSize: 12, fontFamily: 'Inter_400Regular' },
+  orderItemPrice: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  orderNote: { marginTop: 6, backgroundColor: 'rgba(234,179,8,0.06)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(234,179,8,0.15)' },
+  orderNoteText: { color: 'rgba(180,140,8,0.8)', fontSize: 10, fontFamily: 'Inter_400Regular' },
+  orderBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.border },
   orderTime: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_400Regular' },
-  orderTotal: { color: '#fff', fontFamily: 'Inter_700Bold', fontSize: 15 },
+  orderTotal: { color: COLORS.text, fontFamily: 'Inter_700Bold', fontSize: 15 },
 });

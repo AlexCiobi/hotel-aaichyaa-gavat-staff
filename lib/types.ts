@@ -40,4 +40,4 @@ export interface OrderRecord {
   payment_method: string;
 }
 
-export type StaffRole = 'waiter' | 'kitchen';
+export type StaffRole = 'waiter' | 'kitchen' | 'admin';

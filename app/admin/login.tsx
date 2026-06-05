@@ -3,20 +3,17 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingVi
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS } from '../../lib/colors';
 
-const WAITER_PIN = '1234';
+const ADMIN_PIN = '9999';
 
-export default function WaiterLogin() {
-  const [name, setName] = useState('');
+export default function AdminLogin() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
 
   async function handleLogin() {
-    if (!name.trim()) { setError('Enter your name'); return; }
-    if (pin !== WAITER_PIN) { setError('Invalid PIN'); return; }
-    await AsyncStorage.setItem('staff_waiter', JSON.stringify({ name: name.trim(), loggedInAt: Date.now() }));
-    router.replace('/waiter/portal');
+    if (pin !== ADMIN_PIN) { setError('Invalid PIN'); return; }
+    await AsyncStorage.setItem('staff_admin', JSON.stringify({ loggedInAt: Date.now() }));
+    router.replace('/admin/panel');
   }
 
   return (
@@ -28,30 +25,20 @@ export default function WaiterLogin() {
 
         <View style={styles.header}>
           <View style={styles.iconWrap}>
-            <Text style={{ fontSize: 36 }}>🍽</Text>
+            <Text style={{ fontSize: 36 }}>📊</Text>
           </View>
-          <Text style={styles.title}>Waiter Login</Text>
+          <Text style={styles.title}>Admin Panel</Text>
           <Text style={styles.subtitle}>Hotel Aaichyaa Gavat</Text>
         </View>
 
         <View style={styles.form}>
           <View>
-            <Text style={styles.label}>YOUR NAME</Text>
-            <TextInput
-              value={name}
-              onChangeText={v => { setName(v); setError(''); }}
-              placeholder="e.g. Raj"
-              placeholderTextColor={COLORS.textDim}
-              style={styles.input}
-            />
-          </View>
-          <View>
-            <Text style={styles.label}>PIN</Text>
+            <Text style={styles.label}>ADMIN PIN</Text>
             <TextInput
               value={pin}
               onChangeText={v => { setPin(v); setError(''); }}
-              placeholder="Enter 4-digit PIN"
-              placeholderTextColor={COLORS.textDim}
+              placeholder="Enter PIN"
+              placeholderTextColor="#CCCCCC"
               secureTextEntry
               maxLength={6}
               keyboardType="number-pad"
@@ -64,7 +51,7 @@ export default function WaiterLogin() {
             </View>
           ) : null}
           <TouchableOpacity style={styles.button} onPress={handleLogin} activeOpacity={0.8}>
-            <Text style={styles.buttonText}>Start Shift</Text>
+            <Text style={styles.buttonText}>Open Admin Panel</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -73,30 +60,30 @@ export default function WaiterLogin() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bg },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
   inner: { flex: 1, justifyContent: 'center', padding: 24 },
   back: { position: 'absolute', top: 16, left: 0 },
-  backText: { color: COLORS.textMuted, fontSize: 14, fontFamily: 'Inter_400Regular' },
+  backText: { color: '#999999', fontSize: 14, fontFamily: 'Inter_400Regular' },
   header: { alignItems: 'center', marginBottom: 40 },
-  iconWrap: { width: 72, height: 72, borderRadius: 20, backgroundColor: COLORS.crimsonLight, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  title: { color: COLORS.text, fontSize: 22, fontFamily: 'Inter_700Bold' },
-  subtitle: { color: COLORS.textMuted, fontSize: 12, marginTop: 4, fontFamily: 'Inter_400Regular' },
+  iconWrap: { width: 72, height: 72, borderRadius: 20, backgroundColor: 'rgba(59,130,246,0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  title: { color: '#1A1A1A', fontSize: 22, fontFamily: 'Inter_700Bold' },
+  subtitle: { color: '#999999', fontSize: 12, marginTop: 4, fontFamily: 'Inter_400Regular' },
   form: { gap: 16 },
-  label: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 1, marginBottom: 8 },
+  label: { color: '#999999', fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 1, marginBottom: 8 },
   input: {
-    backgroundColor: COLORS.inputBg,
+    backgroundColor: '#F5F5F5',
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    color: COLORS.text,
+    color: '#1A1A1A',
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: '#EEEEEE',
     fontFamily: 'Inter_400Regular',
   },
   pinInput: { textAlign: 'center', letterSpacing: 8, fontSize: 22 },
   errorBox: { backgroundColor: 'rgba(239,68,68,0.08)', borderRadius: 10, padding: 12 },
-  errorText: { color: COLORS.red, fontSize: 13, textAlign: 'center', fontFamily: 'Inter_600SemiBold' },
-  button: { backgroundColor: COLORS.crimson, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
+  errorText: { color: '#EF4444', fontSize: 13, textAlign: 'center', fontFamily: 'Inter_600SemiBold' },
+  button: { backgroundColor: '#3B82F6', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   buttonText: { color: '#fff', fontSize: 16, fontFamily: 'Inter_700Bold' },
 });
