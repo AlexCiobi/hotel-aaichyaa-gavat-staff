@@ -248,27 +248,27 @@ export default function WaiterPortal() {
 
           {selectedTable && (
             <>
-              {/* Search */}
-              <View style={s.searchWrap}>
-                <TextInput value={search} onChangeText={setSearch} placeholder="Search menu..."
-                  placeholderTextColor={COLORS.textDim} style={s.searchInput} />
-              </View>
-
-              {/* Categories */}
-              <View style={s.catRow}>
-                {CATEGORIES.map(cat => (
-                  <TouchableOpacity key={cat.key} onPress={() => setCategory(cat.key)}
-                    style={[s.catPill, category === cat.key && s.catPillActive]}>
-                    <Text style={[s.catPillText, category === cat.key && s.catPillTextActive]}>{cat.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
               {/* Items */}
               <FlatList
                 data={filteredMenu}
                 keyExtractor={i => i.id}
                 contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: cart.length > 0 ? 180 : 100 }}
+                ListHeaderComponent={
+                  <>
+                    <View style={[s.searchWrap, { paddingHorizontal: 0 }]}>
+                      <TextInput value={search} onChangeText={setSearch} placeholder="Search menu..."
+                        placeholderTextColor={COLORS.textDim} style={s.searchInput} />
+                    </View>
+                    <View style={[s.catRow, { paddingHorizontal: 0 }]}>
+                      {CATEGORIES.map(cat => (
+                        <TouchableOpacity key={cat.key} onPress={() => setCategory(cat.key)}
+                          style={[s.catPill, category === cat.key && s.catPillActive]}>
+                          <Text style={[s.catPillText, category === cat.key && s.catPillTextActive]}>{cat.label}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                }
                 renderItem={({ item }) => {
                   const inCart = cart.find(c => c.menuItem.id === item.id);
                   return (
