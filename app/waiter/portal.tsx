@@ -255,14 +255,14 @@ export default function WaiterPortal() {
               </View>
 
               {/* Categories */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.catRow}>
+              <View style={s.catRow}>
                 {CATEGORIES.map(cat => (
                   <TouchableOpacity key={cat.key} onPress={() => setCategory(cat.key)}
                     style={[s.catPill, category === cat.key && s.catPillActive]}>
                     <Text style={[s.catPillText, category === cat.key && s.catPillTextActive]}>{cat.label}</Text>
                   </TouchableOpacity>
                 ))}
-              </ScrollView>
+              </View>
 
               {/* Items */}
               <FlatList
@@ -435,8 +435,8 @@ const s = StyleSheet.create({
   searchWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
   searchInput: { backgroundColor: COLORS.inputBg, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, color: COLORS.text, fontSize: 14, borderWidth: 1, borderColor: COLORS.border, fontFamily: 'Inter_400Regular' },
 
-  catRow: { paddingHorizontal: 16, paddingVertical: 8, gap: 6 },
-  catPill: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 10, backgroundColor: COLORS.inputBg },
+  catRow: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingVertical: 8, gap: 6 },
+  catPill: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: COLORS.inputBg },
   catPillActive: { backgroundColor: COLORS.crimson },
   catPillText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   catPillTextActive: { color: '#fff' },
