@@ -1,25 +1,27 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, ActivityIndicator, Alert, FlatList,
+  StyleSheet, ActivityIndicator, Alert, FlatList, Image, Animated,
 } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { COLORS } from '../../lib/colors';
-import { playWaiterNotification, unloadSounds } from '../../lib/sounds';
+import { playWaiterNotification, playBillNotification, unloadSounds } from '../../lib/sounds';
 import type { RestaurantTable, MenuItem, CartItem, OrderRecord } from '../../lib/types';
 
 const CATEGORIES = [
   { key: 'all', label: 'All' },
-  { key: 'thali', label: 'Thali' },
-  { key: 'starters', label: 'Starters' },
-  { key: 'main_course', label: 'Main' },
-  { key: 'breads', label: 'Breads' },
-  { key: 'rice', label: 'Rice' },
-  { key: 'beverages', label: 'Drinks' },
-  { key: 'snacks', label: 'Snacks' },
+  { key: 'VEG', label: 'Veg' },
+  { key: 'NON_VEG_PLATTER', label: 'Non-Veg' },
+  { key: 'CHICKEN_HANDI', label: 'Chicken Handi' },
+  { key: 'MUTTON_HANDI', label: 'Mutton Handi' },
+  { key: 'MUTTON_PLATE', label: 'Mutton Plate' },
+  { key: 'EGG', label: 'Egg' },
+  { key: 'RICE', label: 'Rice' },
+  { key: 'BREAD', label: 'Bread' },
+  { key: 'OTHERS', label: 'Others' },
 ];
 
 function statusBadge(s: string) {
@@ -34,6 +36,14 @@ function statusBadge(s: string) {
 
 type TabView = 'tables' | 'menu' | 'orders';
 
+interface BillData {
+  order: OrderRecord;
+  tableName: string | null;
+  paymentMethod: 'cash' | 'online';
+  cashGiven: number;
+}
+
+
 export default function WaiterPortal() {
   const [waiterName, setWaiterName] = useState('Waiter');
   const [tables, setTables] = useState<RestaurantTable[]>([]);
@@ -47,6 +57,18 @@ export default function WaiterPortal() {
   const [submitting, setSubmitting] = useState(false);
   const [tab, setTab] = useState<TabView>('tables');
   const [showCart, setShowCart] = useState(false);
+  const [billOrder, setBillOrder] = useState<OrderRecord | null>(null);
+  const [billTableOrders, setBillTableOrders] = useState<OrderRecord[]>([]);
+  const [billPayment, setBillPayment] = useState<'cash' | 'online' | 'split'>('cash');
+  const [billCashGiven, setBillCashGiven] = useState('');
+  const [billSplitCash, setBillSplitCash] = useState('');
+  const [billSplitOnline, setBillSplitOnline] = useState('');
+  const [editOrder, setEditOrder] = useState<OrderRecord | null>(null);
+  const [editItems, setEditItems] = useState<{ id: string; name: string; qty: number; price: number }[]>([]);
+  const [editSearch, setEditSearch] = useState('');
+  const [editShowMenu, setEditShowMenu] = useState(false);
+  const [editCategory, setEditCategory] = useState('all');
+
 
   const fetchAll = useCallback(async () => {
     const [{ data: t }, { data: m }, { data: o }] = await Promise.all([
@@ -71,13 +93,63 @@ export default function WaiterPortal() {
     fetchAll();
   }, [fetchAll]);
 
-  // Real-time with sound when order becomes ready
+  // Notification popup state
+  const [notif, setNotif] = useState<string | null>(null);
+  const notifAnim = useRef(new Animated.Value(-100)).current;
+  const notifTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const showNotif = (msg: string) => {
+    setNotif(msg);
+    notifAnim.setValue(-100);
+    Animated.spring(notifAnim, { toValue: 0, useNativeDriver: true, speed: 14, bounciness: 6 }).start();
+    if (notifTimer.current) clearTimeout(notifTimer.current);
+    notifTimer.current = setTimeout(() => {
+      Animated.timing(notifAnim, { toValue: -100, duration: 300, useNativeDriver: true }).start(() => setNotif(null));
+    }, 4000);
+  };
+
+  // Track delivered order IDs to avoid re-triggering bill on refresh
+  const deliveredBillShown = useRef<Set<string>>(new Set());
+
+  // Real-time with sound when order becomes ready + auto-bill on delivered
   useEffect(() => {
     const ch = supabase
       .channel('waiter-live')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload: any) => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, async (payload: any) => {
         if (payload.new?.order_status === 'ready' && payload.old?.order_status !== 'ready') {
-          playWaiterNotification();
+          const orderNum = payload.new?.order_number ?? '';
+          playWaiterNotification(orderNum);
+          showNotif(`✅ Order ${orderNum} is READY — Pick up from kitchen!`);
+        }
+        // Auto-open bill when kitchen marks order as delivered
+        if (payload.new?.order_status === 'delivered' && payload.old?.order_status !== 'delivered') {
+          const orderId = payload.new?.id;
+          if (orderId && !deliveredBillShown.current.has(orderId)) {
+            deliveredBillShown.current.add(orderId);
+            // Fetch fresh data first, then open bill
+            const [{ data: freshOrders }] = await Promise.all([
+              supabase.from('orders').select('*')
+                .in('order_status', ['placed', 'confirmed', 'preparing', 'ready', 'delivered'])
+                .order('created_at', { ascending: false }),
+            ]);
+            const allActive = freshOrders ?? [];
+            setOrders(allActive);
+            const deliveredOrder = allActive.find((o: OrderRecord) => o.id === orderId);
+            if (deliveredOrder) {
+              const tableOrders = deliveredOrder.table_id
+                ? allActive.filter((o: OrderRecord) => o.table_id === deliveredOrder.table_id && o.order_status !== 'cancelled')
+                : [deliveredOrder];
+              setBillTableOrders(tableOrders);
+              setBillOrder(deliveredOrder);
+              setBillCashGiven('');
+              setBillSplitCash('');
+              setBillSplitOnline('');
+              setBillPayment('cash');
+              playBillNotification(deliveredOrder.order_number);
+              showNotif(`🧾 Bill generated — Table ${deliveredOrder.table_id ? '' : 'Takeaway'}`);
+            }
+            return; // skip fetchAll since we already fetched
+          }
         }
         fetchAll();
       })
@@ -88,7 +160,7 @@ export default function WaiterPortal() {
 
   const filteredMenu = menuItems.filter(i => {
     if (category !== 'all' && i.category !== category) return false;
-    if (search && !i.name_en.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !i.name_en.toLowerCase().includes(search.toLowerCase()) && !(i.name_mr && i.name_mr.includes(search))) return false;
     return true;
   });
 
@@ -116,7 +188,7 @@ export default function WaiterPortal() {
       whatsapp_number: '+910000000000',
       order_type: 'dine-in',
       table_id: selectedTable.id,
-      items: cart.map(c => ({ id: c.menuItem.id, name: c.menuItem.name_en, qty: c.quantity, price: c.menuItem.price })),
+      items: cart.map(c => ({ id: c.menuItem.id, name: c.menuItem.name_en, name_mr: c.menuItem.name_mr, qty: c.quantity, price: c.menuItem.price })),
       subtotal: cartTotal,
       total: cartTotal,
       payment_method: 'cod',
@@ -163,13 +235,113 @@ export default function WaiterPortal() {
 
   const tableForId = (id: string | null) => tables.find(t => t.id === id);
 
+  const openTableBill = (order: OrderRecord) => {
+    // Find ALL non-cancelled orders for this table
+    const tableOrders = order.table_id
+      ? orders.filter(o => o.table_id === order.table_id && o.order_status !== 'cancelled')
+      : [order];
+    setBillTableOrders(tableOrders);
+    setBillOrder(order);
+    setBillCashGiven('');
+    setBillSplitCash('');
+    setBillSplitOnline('');
+    setBillPayment('cash');
+  };
+
+  const cancelOrder = (order: OrderRecord) => {
+    Alert.alert(
+      'Cancel Order',
+      `Cancel order ${order.order_number}? This cannot be undone.`,
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase.from('orders').update({ order_status: 'cancelled' }).eq('id', order.id);
+            if (order.table_id) {
+              const otherOrders = orders.filter(o => o.id !== order.id && o.table_id === order.table_id);
+              if (otherOrders.length === 0) {
+                await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', order.table_id);
+              }
+            }
+            Alert.alert('Cancelled', `Order ${order.order_number} has been cancelled.`);
+            fetchAll();
+          },
+        },
+      ]
+    );
+  };
+
+  const openEditOrder = (order: OrderRecord) => {
+    setEditOrder(order);
+    setEditItems(Array.isArray(order.items) ? order.items.map(i => ({ ...i })) : []);
+    setEditSearch('');
+    setEditShowMenu(false);
+    setEditCategory('all');
+  };
+
+  const addItemToEdit = (menuItem: MenuItem) => {
+    setEditItems(prev => {
+      const existing = prev.find(i => i.id === menuItem.id);
+      if (existing) return prev.map(i => i.id === menuItem.id ? { ...i, qty: i.qty + 1 } : i);
+      return [...prev, { id: menuItem.id, name: menuItem.name_en, qty: 1, price: menuItem.price }];
+    });
+  };
+
+  const editMenuFiltered = menuItems.filter(i => {
+    if (editCategory !== 'all' && i.category !== editCategory) return false;
+    if (editSearch && !i.name_en.toLowerCase().includes(editSearch.toLowerCase()) && !(i.name_mr && i.name_mr.includes(editSearch))) return false;
+    return true;
+  });
+
+  const updateEditQty = (idx: number, delta: number) => {
+    setEditItems(prev => {
+      const updated = prev.map((item, i) => i === idx ? { ...item, qty: Math.max(0, item.qty + delta) } : item);
+      return updated.filter(i => i.qty > 0);
+    });
+  };
+
+  const saveEditOrder = async () => {
+    if (!editOrder) return;
+    if (editItems.length === 0) {
+      Alert.alert('Empty Order', 'Cannot save an order with no items. Cancel the order instead.');
+      return;
+    }
+    const newSubtotal = editItems.reduce((s, i) => s + i.price * i.qty, 0);
+    const { error } = await supabase.from('orders').update({
+      items: editItems,
+      subtotal: newSubtotal,
+      total: newSubtotal,
+    }).eq('id', editOrder.id);
+    if (error) {
+      Alert.alert('Error', error.message);
+    } else {
+      Alert.alert('Updated', `Order ${editOrder.order_number} has been modified.`);
+      setEditOrder(null);
+      fetchAll();
+    }
+  };
+
   // ---- RENDER ----
   return (
     <SafeAreaView style={s.container}>
+      {/* Notification popup */}
+      {notif && (
+        <Animated.View style={[s.notifBanner, { transform: [{ translateY: notifAnim }] }]}>
+          <Text style={s.notifText}>{notif}</Text>
+          <TouchableOpacity onPress={() => {
+            Animated.timing(notifAnim, { toValue: -100, duration: 200, useNativeDriver: true }).start(() => setNotif(null));
+          }}>
+            <Text style={s.notifDismiss}>✕</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
       {/* Header */}
       <View style={s.header}>
         <View style={s.headerLeft}>
-          <View style={s.headerDot} />
+          <Image source={require('../../assets/logo.png')} style={s.headerDot} />
           <View>
             <Text style={s.headerTitle}>Waiter Portal</Text>
             <Text style={s.headerSub}>{waiterName}</Text>
@@ -194,9 +366,10 @@ export default function WaiterPortal() {
       {/* ====== TABLES ====== */}
       {tab === 'tables' && (
         <ScrollView contentContainerStyle={s.content}>
-          <Text style={s.sectionTitle}>Select a Table</Text>
+          {/* Main Section */}
+          <Text style={s.sectionTitle}>Main Section</Text>
           <View style={s.tableGrid}>
-            {tables.map(table => {
+            {tables.filter(t => t.zone === 'main').map(table => {
               const sel = selectedTable?.id === table.id;
               const occ = table.status === 'occupied';
               const res = table.status === 'reserved';
@@ -215,6 +388,30 @@ export default function WaiterPortal() {
               );
             })}
           </View>
+
+          {/* Family Section */}
+          <Text style={[s.sectionTitle, { marginTop: 20 }]}>Family Section</Text>
+          <View style={s.tableGrid}>
+            {tables.filter(t => t.zone === 'family').map(table => {
+              const sel = selectedTable?.id === table.id;
+              const occ = table.status === 'occupied';
+              const res = table.status === 'reserved';
+              return (
+                <TouchableOpacity key={table.id}
+                  onPress={() => { setSelectedTable(table); setTab('menu'); }}
+                  onLongPress={() => occ ? freeTable(table) : undefined}
+                  delayLongPress={500}
+                  style={[s.tableCard, sel && s.tableCardSel, occ && s.tableCardOcc, res && s.tableCardRes]}>
+                  <Text style={s.tableNum}>{table.table_number}</Text>
+                  <Text style={s.tableSeats}>{table.capacity} seats</Text>
+                  <Text style={[s.tableBadge, occ && { color: COLORS.orange }, res && { color: COLORS.purple }]}>
+                    {occ ? 'Busy' : res ? 'Rsv' : 'Free'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
           <View style={s.legend}>
             <View style={s.legendItem}><View style={[s.legendDot, { backgroundColor: COLORS.green }]} /><Text style={s.legendText}>Available</Text></View>
             <View style={s.legendItem}><View style={[s.legendDot, { backgroundColor: COLORS.orange }]} /><Text style={s.legendText}>Occupied</Text></View>
@@ -273,10 +470,17 @@ export default function WaiterPortal() {
                   const inCart = cart.find(c => c.menuItem.id === item.id);
                   return (
                     <View style={s.menuRow}>
+                      {item.image_url ? (
+                        <Image source={{ uri: item.image_url }} style={s.menuImg} />
+                      ) : (
+                        <View style={[s.menuImgPlaceholder, { backgroundColor: item.is_veg ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)' }]}>
+                          <Text style={{ fontSize: 16 }}>{item.is_veg ? '🥬' : '🍗'}</Text>
+                        </View>
+                      )}
                       <View style={[s.vegDot, { backgroundColor: item.is_veg ? COLORS.green : COLORS.red }]} />
                       <View style={{ flex: 1 }}>
-                        <Text style={s.menuName}>{item.name_en}</Text>
-                        <Text style={s.menuNameMr}>{item.name_mr}</Text>
+                        <Text style={s.menuName}>{item.name_mr}</Text>
+                        <Text style={s.menuNameEn}>{item.name_en}</Text>
                       </View>
                       <Text style={s.menuPrice}>Rs.{item.price}</Text>
                       {inCart ? (
@@ -382,11 +586,356 @@ export default function WaiterPortal() {
                   </Text>
                   <Text style={s.orderTotal}>Rs.{order.total || order.subtotal}</Text>
                 </View>
+                <TouchableOpacity onPress={() => openTableBill(order)} style={s.billBtn}>
+                  <Text style={s.billBtnText}>Generate Bill</Text>
+                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  {order.order_status !== 'ready' && (
+                    <TouchableOpacity onPress={() => openEditOrder(order)} style={[s.orderActionBtn, { backgroundColor: 'rgba(59,130,246,0.1)' }]}>
+                      <Text style={[s.orderActionBtnText, { color: '#2563EB' }]}>Modify</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity onPress={() => cancelOrder(order)} style={[s.orderActionBtn, { backgroundColor: 'rgba(239,68,68,0.1)' }]}>
+                    <Text style={[s.orderActionBtnText, { color: '#EF4444' }]}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             );
           })}
         </ScrollView>
       )}
+      {/* ====== EDIT ORDER MODAL ====== */}
+      {editOrder && (
+        <View style={s.billOverlay}>
+          <View style={[s.billModal, { maxHeight: '90%' }]}>
+            <Text style={s.billTitle}>Modify Order</Text>
+            <Text style={[s.billInfo, { textAlign: 'center', marginBottom: 8 }]}>{editOrder.order_number}</Text>
+            <View style={s.billDivider} />
+            <ScrollView style={{ maxHeight: editShowMenu ? 150 : 250 }}>
+              {editItems.map((item, idx) => (
+                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' }}>
+                  <Text style={{ flex: 1, color: COLORS.text, fontSize: 14, fontFamily: 'Inter_600SemiBold' }}>{item.name}</Text>
+                  <Text style={{ color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_400Regular', marginRight: 10 }}>Rs.{item.price}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <TouchableOpacity onPress={() => updateEditQty(idx, -1)} style={s.qtyBtn}>
+                      <Text style={s.qtyBtnText}>-</Text>
+                    </TouchableOpacity>
+                    <Text style={s.qtyNum}>{item.qty}</Text>
+                    <TouchableOpacity onPress={() => updateEditQty(idx, 1)} style={[s.qtyBtn, s.qtyBtnAdd]}>
+                      <Text style={[s.qtyBtnText, { color: '#fff' }]}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+
+            {/* Add Items from Menu */}
+            <TouchableOpacity
+              onPress={() => setEditShowMenu(!editShowMenu)}
+              style={{ backgroundColor: COLORS.crimson + '10', borderRadius: 10, padding: 10, marginTop: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+            >
+              <Text style={{ color: COLORS.crimson, fontFamily: 'Inter_700Bold', fontSize: 13 }}>
+                {editShowMenu ? 'Hide Menu' : '+ Add Items from Menu'}
+              </Text>
+            </TouchableOpacity>
+
+            {editShowMenu && (
+              <View style={{ marginTop: 8 }}>
+                <TextInput
+                  value={editSearch}
+                  onChangeText={setEditSearch}
+                  placeholder="Search menu..."
+                  placeholderTextColor={COLORS.textDim}
+                  style={{ backgroundColor: COLORS.inputBg, borderRadius: 8, padding: 10, fontSize: 13, fontFamily: 'Inter_400Regular', color: COLORS.text, marginBottom: 6 }}
+                />
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 6 }}>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {CATEGORIES.map(cat => (
+                      <TouchableOpacity
+                        key={cat.key}
+                        onPress={() => setEditCategory(cat.key)}
+                        style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: editCategory === cat.key ? COLORS.crimson : COLORS.inputBg }}
+                      >
+                        <Text style={{ fontSize: 11, fontFamily: 'Inter_600SemiBold', color: editCategory === cat.key ? '#fff' : COLORS.text }}>{cat.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
+                <ScrollView style={{ maxHeight: 220 }}>
+                  {editMenuFiltered.map(mi => {
+                    const inOrder = editItems.find(i => i.id === mi.id);
+                    return (
+                      <TouchableOpacity
+                        key={mi.id}
+                        onPress={() => addItemToEdit(mi)}
+                        style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' }}
+                      >
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: mi.is_veg ? '#16A34A' : '#EF4444', marginRight: 8 }} />
+                        <Text style={{ flex: 1, color: COLORS.text, fontSize: 13, fontFamily: 'Inter_400Regular' }}>{mi.name_en}</Text>
+                        <Text style={{ color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_400Regular', marginRight: 8 }}>Rs.{mi.price}</Text>
+                        {inOrder ? (
+                          <View style={{ backgroundColor: COLORS.crimson, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 }}>
+                            <Text style={{ color: '#fff', fontSize: 11, fontFamily: 'Inter_700Bold' }}>{inOrder.qty}</Text>
+                          </View>
+                        ) : (
+                          <View style={{ backgroundColor: COLORS.crimson, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 }}>
+                            <Text style={{ color: '#fff', fontSize: 11, fontFamily: 'Inter_700Bold' }}>+</Text>
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
+            <View style={s.billDivider} />
+            <View style={s.billTotalRow}>
+              <Text style={s.billTotalLabel}>New Total</Text>
+              <Text style={[s.billTotalValue, { color: COLORS.crimson }]}>Rs.{editItems.reduce((sum, i) => sum + i.price * i.qty, 0)}</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <TouchableOpacity onPress={() => setEditOrder(null)} style={[s.billActionBtn, { backgroundColor: COLORS.inputBg }]}>
+                <Text style={[s.billActionBtnText, { color: COLORS.text }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={saveEditOrder} style={[s.billActionBtn, { backgroundColor: COLORS.blue }]}>
+                <Text style={s.billActionBtnText}>Save Changes</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+      {/* ====== BILL MODAL (consolidated per table) ====== */}
+      {billOrder && (() => {
+        // Separate first order items from add-on orders
+        const sorted = [...billTableOrders].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        const firstOrder = sorted[0];
+        const addOnOrders = sorted.slice(1);
+
+        // First order items (merged)
+        const mainItems: { name: string; name_mr?: string; qty: number; price: number }[] = [];
+        if (firstOrder && Array.isArray(firstOrder.items)) {
+          firstOrder.items.forEach((item: any) => {
+            const existing = mainItems.find(a => a.name === item.name && a.price === item.price);
+            if (existing) { existing.qty += item.qty; }
+            else { mainItems.push({ name: item.name, name_mr: item.name_mr, qty: item.qty, price: item.price }); }
+          });
+        }
+
+        // Add-on items (merged across all subsequent orders)
+        const addOnItems: { name: string; name_mr?: string; qty: number; price: number }[] = [];
+        addOnOrders.forEach(o => {
+          if (Array.isArray(o.items)) {
+            o.items.forEach((item: any) => {
+              const existing = addOnItems.find(a => a.name === item.name && a.price === item.price);
+              if (existing) { existing.qty += item.qty; }
+              else { addOnItems.push({ name: item.name, name_mr: item.name_mr, qty: item.qty, price: item.price }); }
+            });
+          }
+        });
+
+        const allItems = [...mainItems, ...addOnItems];
+        const billTotal = allItems.reduce((s, i) => s + i.price * i.qty, 0);
+        const tbl = billOrder.table_id ? tableForId(billOrder.table_id) : null;
+
+        return (
+        <View style={s.billOverlay}>
+          <View style={s.billModal}>
+            <ScrollView>
+              <View style={s.billHeader}>
+                <Image source={require('../../assets/logo.png')} style={{ width: 50, height: 50, borderRadius: 25, alignSelf: 'center' }} />
+                <Text style={s.billTitle}>Hotel Aaichyaa Gavat</Text>
+                <Text style={s.billSubtitle}>हक्काची जागा</Text>
+                <View style={s.billDivider} />
+                {tbl && <Text style={s.billInfo}>Table: {tbl.table_number}</Text>}
+                <Text style={s.billInfo}>Date: {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                <Text style={s.billInfo}>Time: {new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</Text>
+                {billTableOrders.length > 1 && (
+                  <Text style={[s.billInfo, { color: COLORS.crimson, fontFamily: 'Inter_600SemiBold', marginTop: 4 }]}>
+                    {billTableOrders.length} orders combined
+                  </Text>
+                )}
+                {billTableOrders.map(o => (
+                  <Text key={o.id} style={[s.billInfo, { fontSize: 10, color: COLORS.textMuted }]}>{o.order_number}</Text>
+                ))}
+              </View>
+
+              <View style={s.billDivider} />
+              <View style={s.billItemsHeader}>
+                <Text style={[s.billItemText, { flex: 1, fontFamily: 'Inter_700Bold' }]}>Item</Text>
+                <Text style={[s.billItemText, { width: 30, textAlign: 'center', fontFamily: 'Inter_700Bold' }]}>Qty</Text>
+                <Text style={[s.billItemText, { width: 60, textAlign: 'right', fontFamily: 'Inter_700Bold' }]}>Price</Text>
+                <Text style={[s.billItemText, { width: 70, textAlign: 'right', fontFamily: 'Inter_700Bold' }]}>Total</Text>
+              </View>
+              {mainItems.map((item, i) => (
+                <View key={i} style={s.billItemRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.billItemText}>{item.name_mr || item.name}</Text>
+                    {item.name_mr && <Text style={{ color: COLORS.textMuted, fontSize: 9, fontFamily: 'Inter_400Regular' }}>{item.name}</Text>}
+                  </View>
+                  <Text style={[s.billItemText, { width: 30, textAlign: 'center' }]}>{item.qty}</Text>
+                  <Text style={[s.billItemText, { width: 60, textAlign: 'right' }]}>Rs.{item.price}</Text>
+                  <Text style={[s.billItemText, { width: 70, textAlign: 'right', fontFamily: 'Inter_700Bold' }]}>Rs.{item.price * item.qty}</Text>
+                </View>
+              ))}
+
+              {addOnItems.length > 0 && (
+                <>
+                  <View style={[s.billDivider, { marginVertical: 6 }]} />
+                  <Text style={{ fontFamily: 'Inter_700Bold', fontSize: 12, color: COLORS.crimson, marginBottom: 6, textAlign: 'center' }}>— Extra Add-ons —</Text>
+                  {addOnItems.map((item, i) => (
+                    <View key={`addon-${i}`} style={s.billItemRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.billItemText}>{item.name_mr || item.name}</Text>
+                        {item.name_mr && <Text style={{ color: COLORS.textMuted, fontSize: 9, fontFamily: 'Inter_400Regular' }}>{item.name}</Text>}
+                      </View>
+                      <Text style={[s.billItemText, { width: 30, textAlign: 'center' }]}>{item.qty}</Text>
+                      <Text style={[s.billItemText, { width: 60, textAlign: 'right' }]}>Rs.{item.price}</Text>
+                      <Text style={[s.billItemText, { width: 70, textAlign: 'right', fontFamily: 'Inter_700Bold' }]}>Rs.{item.price * item.qty}</Text>
+                    </View>
+                  ))}
+                </>
+              )}
+
+              <View style={s.billDivider} />
+              <View style={s.billTotalRow}>
+                <Text style={[s.billTotalLabel, { fontFamily: 'Inter_700Bold', fontSize: 16 }]}>TOTAL</Text>
+                <Text style={[s.billTotalValue, { fontFamily: 'Inter_700Bold', fontSize: 16, color: COLORS.crimson }]}>Rs.{billTotal}</Text>
+              </View>
+
+              <View style={s.billDivider} />
+              <Text style={[s.billInfo, { fontFamily: 'Inter_700Bold', marginBottom: 8 }]}>Payment Method</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                <TouchableOpacity onPress={() => setBillPayment('cash')} style={[s.billPayBtn, billPayment === 'cash' && s.billPayBtnActive]}>
+                  <Text style={[s.billPayBtnText, billPayment === 'cash' && { color: '#fff' }]}>Cash</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setBillPayment('online')} style={[s.billPayBtn, billPayment === 'online' && s.billPayBtnActive]}>
+                  <Text style={[s.billPayBtnText, billPayment === 'online' && { color: '#fff' }]}>Online</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setBillPayment('split')} style={[s.billPayBtn, billPayment === 'split' && s.billPayBtnActive]}>
+                  <Text style={[s.billPayBtnText, billPayment === 'split' && { color: '#fff' }]}>Split</Text>
+                </TouchableOpacity>
+              </View>
+
+              {billPayment === 'cash' && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={[s.billInfo, { fontFamily: 'Inter_700Bold', marginBottom: 6 }]}>Cash Given by Customer</Text>
+                  <TextInput
+                    value={billCashGiven}
+                    onChangeText={setBillCashGiven}
+                    keyboardType="numeric"
+                    placeholder="Enter amount..."
+                    placeholderTextColor={COLORS.textDim}
+                    style={s.billCashInput}
+                  />
+                  {billCashGiven && Number(billCashGiven) >= billTotal && (
+                    <View style={s.billChangeRow}>
+                      <Text style={s.billChangeLabel}>Change to Return</Text>
+                      <Text style={s.billChangeValue}>Rs.{Number(billCashGiven) - billTotal}</Text>
+                    </View>
+                  )}
+                  {billCashGiven && Number(billCashGiven) < billTotal && (
+                    <Text style={{ color: COLORS.red, fontSize: 12, fontFamily: 'Inter_600SemiBold', marginTop: 6 }}>
+                      Insufficient (need Rs.{billTotal - Number(billCashGiven)} more)
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {billPayment === 'online' && (
+                <View style={s.billChangeRow}>
+                  <Text style={s.billChangeLabel}>Paid Online</Text>
+                  <Text style={[s.billChangeValue, { color: COLORS.green }]}>Rs.{billTotal}</Text>
+                </View>
+              )}
+
+              {billPayment === 'split' && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={[s.billInfo, { fontFamily: 'Inter_700Bold', marginBottom: 6 }]}>Cash Amount</Text>
+                  <TextInput
+                    value={billSplitCash}
+                    onChangeText={(v) => {
+                      setBillSplitCash(v);
+                      const cash = Number(v) || 0;
+                      setBillSplitOnline(cash <= billTotal ? String(billTotal - cash) : '0');
+                    }}
+                    keyboardType="numeric"
+                    placeholder="Cash amount..."
+                    placeholderTextColor={COLORS.textDim}
+                    style={s.billCashInput}
+                  />
+                  <Text style={[s.billInfo, { fontFamily: 'Inter_700Bold', marginBottom: 6, marginTop: 10 }]}>Online Amount</Text>
+                  <TextInput
+                    value={billSplitOnline}
+                    onChangeText={(v) => {
+                      setBillSplitOnline(v);
+                      const online = Number(v) || 0;
+                      setBillSplitCash(online <= billTotal ? String(billTotal - online) : '0');
+                    }}
+                    keyboardType="numeric"
+                    placeholder="Online amount..."
+                    placeholderTextColor={COLORS.textDim}
+                    style={s.billCashInput}
+                  />
+                  {(Number(billSplitCash) || 0) + (Number(billSplitOnline) || 0) === billTotal && billSplitCash !== '' && (
+                    <View style={[s.billChangeRow, { marginTop: 10 }]}>
+                      <Text style={s.billChangeLabel}>Cash: Rs.{billSplitCash} + Online: Rs.{billSplitOnline}</Text>
+                      <Text style={[s.billChangeValue, { color: COLORS.green, fontSize: 13 }]}>Matched</Text>
+                    </View>
+                  )}
+                  <Text style={[s.billInfo, { fontFamily: 'Inter_700Bold', marginTop: 10, marginBottom: 6 }]}>Cash Given by Customer</Text>
+                  <TextInput
+                    value={billCashGiven}
+                    onChangeText={setBillCashGiven}
+                    keyboardType="numeric"
+                    placeholder="Enter cash given..."
+                    placeholderTextColor={COLORS.textDim}
+                    style={s.billCashInput}
+                  />
+                  {billCashGiven && Number(billCashGiven) >= (Number(billSplitCash) || 0) && (
+                    <View style={s.billChangeRow}>
+                      <Text style={s.billChangeLabel}>Change to Return</Text>
+                      <Text style={s.billChangeValue}>Rs.{Number(billCashGiven) - (Number(billSplitCash) || 0)}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+              <TouchableOpacity onPress={() => setBillOrder(null)} style={[s.billActionBtn, { backgroundColor: COLORS.inputBg }]}>
+                <Text style={[s.billActionBtnText, { color: COLORS.text }]}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={async () => {
+                  // Mark ALL table orders as delivered & paid
+                  const payMethod = billPayment === 'split'
+                    ? `split:cash=${billSplitCash},online=${billSplitOnline}`
+                    : billPayment;
+                  for (const o of billTableOrders) {
+                    await supabase.from('orders').update({
+                      order_status: 'delivered',
+                      payment_method: payMethod,
+                      payment_status: 'paid',
+                    }).eq('id', o.id);
+                  }
+                  if (billOrder.table_id) {
+                    await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', billOrder.table_id);
+                  }
+                  Alert.alert('Bill Settled', `${billTableOrders.length} order(s) settled — Table ${tbl?.table_number ?? ''} is now free.`);
+                  setBillOrder(null);
+                  setBillTableOrders([]);
+                  fetchAll();
+                }}
+                style={[s.billActionBtn, { backgroundColor: COLORS.green }]}
+              >
+                <Text style={s.billActionBtnText}>Settle & Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        );
+      })()}
     </SafeAreaView>
   );
 }
@@ -395,7 +944,7 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border, backgroundColor: COLORS.card },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerDot: { width: 36, height: 36, borderRadius: 10, backgroundColor: COLORS.crimson },
+  headerDot: { width: 36, height: 36, borderRadius: 18 },
   headerTitle: { color: COLORS.text, fontSize: 15, fontFamily: 'Inter_700Bold' },
   headerSub: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_400Regular' },
   logoutText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
@@ -441,10 +990,12 @@ const s = StyleSheet.create({
   catPillText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   catPillTextActive: { color: '#fff' },
 
+  menuImg: { width: 44, height: 44, borderRadius: 10 },
+  menuImgPlaceholder: { width: 44, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   menuRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   vegDot: { width: 8, height: 8, borderRadius: 2 },
   menuName: { color: COLORS.text, fontSize: 14, fontFamily: 'Inter_600SemiBold' },
-  menuNameMr: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_400Regular' },
+  menuNameEn: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_400Regular' },
   menuPrice: { color: COLORS.crimson, fontSize: 14, fontFamily: 'Inter_700Bold', marginRight: 8 },
   addBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: COLORS.crimsonLight, borderWidth: 1, borderColor: 'rgba(192,39,45,0.15)' },
   addBtnText: { color: COLORS.crimson, fontSize: 11, fontFamily: 'Inter_700Bold' },
@@ -489,4 +1040,38 @@ const s = StyleSheet.create({
   orderBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: COLORS.border },
   orderTime: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Inter_400Regular' },
   orderTotal: { color: COLORS.text, fontFamily: 'Inter_700Bold', fontSize: 15 },
+
+  // Order actions
+  orderActionBtn: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
+  orderActionBtnText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+
+  // Bill modal
+  billOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
+  billModal: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '90%' as any, maxHeight: '85%' as any },
+  billHeader: { alignItems: 'center', marginBottom: 8 },
+  billTitle: { color: COLORS.text, fontSize: 18, fontFamily: 'Inter_700Bold', marginTop: 8, textAlign: 'center' },
+  billSubtitle: { color: COLORS.crimson, fontSize: 12, fontFamily: 'Inter_600SemiBold', marginTop: 2, textAlign: 'center' },
+  billDivider: { height: 1, backgroundColor: COLORS.border, marginVertical: 10 },
+  billInfo: { color: COLORS.textSecondary, fontSize: 12, fontFamily: 'Inter_400Regular', marginBottom: 2 },
+  billItemsHeader: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  billItemText: { color: COLORS.text, fontSize: 12, fontFamily: 'Inter_400Regular' },
+  billItemRow: { flexDirection: 'row', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  billTotalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  billTotalLabel: { color: COLORS.text, fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  billTotalValue: { color: COLORS.text, fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  billPayBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center' },
+  billPayBtnActive: { backgroundColor: COLORS.crimson, borderColor: COLORS.crimson },
+  billPayBtnText: { color: COLORS.text, fontSize: 13, fontFamily: 'Inter_700Bold' },
+  billCashInput: { backgroundColor: COLORS.inputBg, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: COLORS.text, borderWidth: 1, borderColor: COLORS.border, fontFamily: 'Inter_400Regular' },
+  billChangeRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(34,197,94,0.08)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginTop: 8 },
+  billChangeLabel: { color: COLORS.textSecondary, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  billChangeValue: { color: COLORS.green, fontSize: 16, fontFamily: 'Inter_700Bold' },
+  billBtn: { backgroundColor: COLORS.green, borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginTop: 8 },
+  billBtnText: { color: '#fff', fontSize: 12, fontFamily: 'Inter_700Bold' },
+  billActionBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  billActionBtnText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_700Bold' },
+
+  notifBanner: { position: 'absolute', top: 50, left: 16, right: 16, zIndex: 999, backgroundColor: '#16A34A', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 10 },
+  notifText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_700Bold', flex: 1 },
+  notifDismiss: { color: 'rgba(255,255,255,0.7)', fontSize: 16, paddingLeft: 12 },
 });

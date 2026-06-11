@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../lib/colors';
@@ -13,9 +13,7 @@ export default function RoleSelect() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.logo}>
-          <Text style={styles.logoText}>AG</Text>
-        </View>
+        <Image source={require('../assets/logo.png')} style={styles.logo} />
         <Text style={styles.title}>Hotel Aaichyaa Gavat</Text>
         <Text style={styles.tagline}>हक्काची जागा</Text>
         <Text style={styles.subtitle}>Staff Portal</Text>
@@ -49,8 +47,7 @@ export default function RoleSelect() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg, padding: 24 },
   header: { alignItems: 'center', marginTop: 40, marginBottom: 40 },
-  logo: { width: 68, height: 68, borderRadius: 18, backgroundColor: COLORS.crimson, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  logoText: { color: '#fff', fontSize: 22, fontFamily: 'Inter_700Bold' },
+  logo: { width: 90, height: 90, borderRadius: 45, marginBottom: 16 },
   title: { color: COLORS.text, fontSize: 22, fontFamily: 'PlayfairDisplay_700Bold', textAlign: 'center' },
   tagline: { color: COLORS.crimson, fontSize: 13, marginTop: 2, fontFamily: 'Inter_600SemiBold' },
   subtitle: { color: COLORS.textMuted, fontSize: 13, marginTop: 6, fontFamily: 'Inter_400Regular' },

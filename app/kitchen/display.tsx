@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, RefreshControl,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, RefreshControl, Image, Animated,
 } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -11,10 +11,10 @@ import { playKitchenNotification, unloadSounds } from '../../lib/sounds';
 import type { OrderRecord } from '../../lib/types';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; border: string; next: string | null; btnLabel: string; btnColor: string }> = {
-  placed: { label: 'NEW', color: '#2563EB', bg: 'rgba(59,130,246,0.06)', border: 'rgba(59,130,246,0.2)', next: 'preparing', btnLabel: 'Start Cooking', btnColor: COLORS.crimson },
-  confirmed: { label: 'CONFIRMED', color: '#7C3AED', bg: 'rgba(168,85,247,0.06)', border: 'rgba(168,85,247,0.2)', next: 'preparing', btnLabel: 'Start Cooking', btnColor: COLORS.crimson },
-  preparing: { label: 'COOKING', color: '#B8860B', bg: 'rgba(234,179,8,0.06)', border: 'rgba(234,179,8,0.2)', next: 'ready', btnLabel: 'Mark Ready', btnColor: '#16A34A' },
-  ready: { label: 'READY', color: '#16A34A', bg: 'rgba(34,197,94,0.06)', border: 'rgba(34,197,94,0.2)', next: 'delivered', btnLabel: 'Mark Delivered', btnColor: '#059669' },
+  placed: { label: 'नवीन', color: '#2563EB', bg: 'rgba(59,130,246,0.06)', border: 'rgba(59,130,246,0.2)', next: 'preparing', btnLabel: 'स्वयंपाक सुरू करा', btnColor: COLORS.crimson },
+  confirmed: { label: 'पुष्टी', color: '#7C3AED', bg: 'rgba(168,85,247,0.06)', border: 'rgba(168,85,247,0.2)', next: 'preparing', btnLabel: 'स्वयंपाक सुरू करा', btnColor: COLORS.crimson },
+  preparing: { label: 'शिजत आहे', color: '#B8860B', bg: 'rgba(234,179,8,0.06)', border: 'rgba(234,179,8,0.2)', next: 'ready', btnLabel: 'तयार आहे', btnColor: '#16A34A' },
+  ready: { label: 'तयार', color: '#16A34A', bg: 'rgba(34,197,94,0.06)', border: 'rgba(34,197,94,0.2)', next: 'delivered', btnLabel: 'दिले', btnColor: '#059669' },
 };
 
 interface TableMap { [id: string]: string }
@@ -55,6 +55,21 @@ export default function KitchenDisplay() {
     fetchAll();
   }, [fetchAll]);
 
+  // Notification popup state
+  const [notif, setNotif] = useState<string | null>(null);
+  const notifAnim = useRef(new Animated.Value(-100)).current;
+  const notifTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const showNotif = (msg: string) => {
+    setNotif(msg);
+    notifAnim.setValue(-100);
+    Animated.spring(notifAnim, { toValue: 0, useNativeDriver: true, speed: 14, bounciness: 6 }).start();
+    if (notifTimer.current) clearTimeout(notifTimer.current);
+    notifTimer.current = setTimeout(() => {
+      Animated.timing(notifAnim, { toValue: -100, duration: 300, useNativeDriver: true }).start(() => setNotif(null));
+    }, 4000);
+  };
+
   // Real-time with sound notification on new orders
   const orderCountRef = useRef(0);
   useEffect(() => { orderCountRef.current = orders.length; }, [orders.length]);
@@ -62,14 +77,17 @@ export default function KitchenDisplay() {
   useEffect(() => {
     const ch = supabase
       .channel('kitchen-live')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, () => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, (payload: any) => {
         playKitchenNotification();
+        const tbl = payload.new?.table_id ? tableMap[payload.new.table_id] : null;
+        const orderNum = payload.new?.order_number ?? '';
+        showNotif(tbl ? `🔔 नवीन ऑर्डर ${orderNum} — टेबल ${tbl}` : `🔔 नवीन ऑर्डर ${orderNum}`);
         fetchAll();
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, () => fetchAll())
       .subscribe();
     return () => { supabase.removeChannel(ch); unloadSounds(); };
-  }, [fetchAll]);
+  }, [fetchAll, tableMap]);
 
   // Tick timer every 30s
   const [, setTick] = useState(0);
@@ -113,35 +131,45 @@ export default function KitchenDisplay() {
 
   return (
     <SafeAreaView style={st.container}>
+      {/* Notification popup */}
+      {notif && (
+        <Animated.View style={[st.notifBanner, { transform: [{ translateY: notifAnim }] }]}>
+          <Text style={st.notifText}>{notif}</Text>
+          <TouchableOpacity onPress={() => {
+            Animated.timing(notifAnim, { toValue: -100, duration: 200, useNativeDriver: true }).start(() => setNotif(null));
+          }}>
+            <Text style={st.notifDismiss}>✕</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
       {/* Header */}
       <View style={st.header}>
         <View style={st.headerLeft}>
-          <View style={st.headerIcon}>
-            <Text style={{ fontSize: 18 }}>👨‍🍳</Text>
-          </View>
+          <Image source={require('../../assets/logo.png')} style={st.headerIcon} />
           <View>
-            <Text style={st.headerTitle}>Kitchen Display</Text>
-            <Text style={st.headerSub}>Hotel Aaichyaa Gavat</Text>
+            <Text style={st.headerTitle}>किचन डिस्प्ले</Text>
+            <Text style={st.headerSub}>हॉटेल आईच्या गावात</Text>
           </View>
         </View>
         <TouchableOpacity onPress={logout}>
-          <Text style={st.logoutText}>Exit</Text>
+          <Text style={st.logoutText}>बाहेर</Text>
         </TouchableOpacity>
       </View>
 
       {/* Filters */}
       <View style={st.filterRow}>
         <TouchableOpacity onPress={() => setFilter('all')} style={[st.filterBtn, filter === 'all' && st.filterBtnActive]}>
-          <Text style={[st.filterText, filter === 'all' && st.filterTextActive]}>All ({orders.length})</Text>
+          <Text style={[st.filterText, filter === 'all' && st.filterTextActive]}>सर्व ({orders.length})</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setFilter('placed')} style={[st.filterBtn, filter === 'placed' && { backgroundColor: 'rgba(59,130,246,0.1)' }]}>
-          <Text style={[st.filterText, filter === 'placed' && { color: '#2563EB' }]}>New ({counts.new})</Text>
+          <Text style={[st.filterText, filter === 'placed' && { color: '#2563EB' }]}>नवीन ({counts.new})</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setFilter('preparing')} style={[st.filterBtn, filter === 'preparing' && { backgroundColor: 'rgba(234,179,8,0.1)' }]}>
-          <Text style={[st.filterText, filter === 'preparing' && { color: '#B8860B' }]}>Cooking ({counts.cooking})</Text>
+          <Text style={[st.filterText, filter === 'preparing' && { color: '#B8860B' }]}>शिजत आहे ({counts.cooking})</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setFilter('ready')} style={[st.filterBtn, filter === 'ready' && { backgroundColor: 'rgba(34,197,94,0.1)' }]}>
-          <Text style={[st.filterText, filter === 'ready' && { color: '#16A34A' }]}>Ready ({counts.ready})</Text>
+          <Text style={[st.filterText, filter === 'ready' && { color: '#16A34A' }]}>तयार ({counts.ready})</Text>
         </TouchableOpacity>
       </View>
 
@@ -153,8 +181,8 @@ export default function KitchenDisplay() {
         {filtered.length === 0 && (
           <View style={st.empty}>
             <Text style={{ fontSize: 40, marginBottom: 12 }}>👨‍🍳</Text>
-            <Text style={st.emptyTitle}>No orders right now</Text>
-            <Text style={st.emptyText}>New orders will appear automatically</Text>
+            <Text style={st.emptyTitle}>सध्या ऑर्डर नाहीत</Text>
+            <Text style={st.emptyText}>नवीन ऑर्डर आपोआप दिसतील</Text>
           </View>
         )}
 
@@ -181,16 +209,19 @@ export default function KitchenDisplay() {
 
               {/* Status */}
               <Text style={[st.statusLabel, { color: cfg.color }]}>{cfg.label}</Text>
-              <Text style={st.orderType}>{order.order_type}</Text>
+              <Text style={st.orderType}>{order.order_type === 'dine-in' ? 'डाइन-इन' : order.order_type === 'takeaway' ? 'पार्सल' : order.order_type === 'preorder' ? 'प्री-ऑर्डर' : order.order_type}</Text>
 
               {/* Items */}
               <View style={st.itemsList}>
-                {Array.isArray(order.items) && order.items.map((item, i) => (
+                {Array.isArray(order.items) && order.items.map((item: any, i: number) => (
                   <View key={i} style={st.itemRow}>
                     <View style={st.itemQtyBadge}>
                       <Text style={st.itemQtyText}>{item.qty}</Text>
                     </View>
-                    <Text style={st.itemName}>{item.name}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={st.itemName}>{item.name_mr || item.name}</Text>
+                      {item.name_mr && <Text style={st.itemNameEn}>{item.name}</Text>}
+                    </View>
                   </View>
                 ))}
               </View>
@@ -211,7 +242,7 @@ export default function KitchenDisplay() {
                   activeOpacity={0.8}
                 >
                   <Text style={st.actionBtnText}>
-                    {updatingId === order.id ? 'Updating...' : cfg.btnLabel}
+                    {updatingId === order.id ? 'अपडेट होत आहे...' : cfg.btnLabel}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -227,7 +258,7 @@ const st = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F9FA' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#EEEEEE', backgroundColor: '#FFFFFF' },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: '#F97316', alignItems: 'center', justifyContent: 'center' },
+  headerIcon: { width: 38, height: 38, borderRadius: 19 },
   headerTitle: { color: '#1A1A1A', fontSize: 15, fontFamily: 'Inter_700Bold' },
   headerSub: { color: '#999999', fontSize: 10, fontFamily: 'Inter_400Regular' },
   logoutText: { color: '#999999', fontSize: 12, fontFamily: 'Inter_600SemiBold' },
@@ -258,11 +289,16 @@ const st = StyleSheet.create({
   itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   itemQtyBadge: { width: 26, height: 26, borderRadius: 8, backgroundColor: '#F5F5F5', alignItems: 'center', justifyContent: 'center' },
   itemQtyText: { color: '#1A1A1A', fontSize: 12, fontFamily: 'Inter_700Bold' },
-  itemName: { color: '#333333', fontSize: 14, fontFamily: 'Inter_600SemiBold', flex: 1 },
+  itemName: { color: '#333333', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  itemNameEn: { color: '#999999', fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 1 },
 
   noteBox: { backgroundColor: 'rgba(234,179,8,0.06)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(234,179,8,0.15)', marginBottom: 10 },
   noteText: { color: 'rgba(180,140,8,0.8)', fontSize: 11, fontFamily: 'Inter_400Regular' },
 
   actionBtn: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
   actionBtnText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_700Bold' },
+
+  notifBanner: { position: 'absolute', top: 50, left: 16, right: 16, zIndex: 999, backgroundColor: '#2563EB', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 12, elevation: 10 },
+  notifText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_700Bold', flex: 1 },
+  notifDismiss: { color: 'rgba(255,255,255,0.7)', fontSize: 16, paddingLeft: 12 },
 });

@@ -1,53 +1,69 @@
-let Audio: any = null;
-let kitchenSound: any = null;
-let waiterSound: any = null;
+import { Vibration, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 
-async function getAudio() {
-  if (Audio) return Audio;
-  try {
-    const mod = require('expo-av');
-    Audio = mod.Audio;
-    return Audio;
-  } catch {
-    return null;
+// Configure notifications to show even when app is in foreground
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
+async function ensurePermissions() {
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') {
+    await Notifications.requestPermissionsAsync();
   }
 }
 
 export async function playKitchenNotification() {
-  try {
-    const A = await getAudio();
-    if (!A) return;
-    await A.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, shouldDuckAndroid: true, playThroughEarpieceAndroid: false });
-    if (kitchenSound) { await kitchenSound.replayAsync(); return; }
-    const { sound } = await A.Sound.createAsync(
-      require('../assets/sounds/new-order.wav'),
-      { shouldPlay: true, volume: 1.0 }
-    );
-    kitchenSound = sound;
-  } catch (e) {
-    console.log('Kitchen sound unavailable:', e);
-  }
+  // Vibration
+  Vibration.vibrate([0, 300, 200, 300, 200, 500]);
+  // System push notification
+  await ensurePermissions();
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'New Order!',
+      body: 'A new order has been placed. Check the kitchen display.',
+      sound: true,
+    },
+    trigger: null, // immediate
+  });
 }
 
-export async function playWaiterNotification() {
-  try {
-    const A = await getAudio();
-    if (!A) return;
-    await A.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, shouldDuckAndroid: true, playThroughEarpieceAndroid: false });
-    if (waiterSound) { await waiterSound.replayAsync(); return; }
-    const { sound } = await A.Sound.createAsync(
-      require('../assets/sounds/order-ready.wav'),
-      { shouldPlay: true, volume: 1.0 }
-    );
-    waiterSound = sound;
-  } catch (e) {
-    console.log('Waiter sound unavailable:', e);
-  }
+export async function playWaiterNotification(orderNum?: string) {
+  // Vibration
+  Vibration.vibrate([0, 200, 150, 400]);
+  // System push notification
+  await ensurePermissions();
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Order Ready!',
+      body: orderNum
+        ? `Order ${orderNum} is READY - Pick up from kitchen!`
+        : 'An order is ready for pickup!',
+      sound: true,
+    },
+    trigger: null,
+  });
 }
 
-export async function unloadSounds() {
-  try {
-    if (kitchenSound) { await kitchenSound.unloadAsync(); kitchenSound = null; }
-    if (waiterSound) { await waiterSound.unloadAsync(); waiterSound = null; }
-  } catch {}
+export async function playBillNotification(orderNum?: string) {
+  Vibration.vibrate([0, 200, 100, 200]);
+  await ensurePermissions();
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Bill Generated',
+      body: orderNum
+        ? `Bill for ${orderNum} has been generated.`
+        : 'A bill has been auto-generated.',
+      sound: true,
+    },
+    trigger: null,
+  });
 }
+
+export async function unloadSounds() {}

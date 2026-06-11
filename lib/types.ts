@@ -17,6 +17,7 @@ export interface MenuItem {
   name_hi: string;
   name_kn: string;
   description_en: string;
+  image_url: string | null;
 }
 
 export interface CartItem {
@@ -38,6 +39,7 @@ export interface OrderRecord {
   created_at: string;
   special_instructions: string | null;
   payment_method: string;
+  payment_status: string;
 }
 
 export type StaffRole = 'waiter' | 'kitchen' | 'admin';

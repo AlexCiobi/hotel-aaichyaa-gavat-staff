@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hotel Aaichyaa Staff",
     "slug": "hotel-aaichyaa-gavat-staff",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "aaichyaa-staff",
@@ -15,6 +15,7 @@
       "bundleIdentifier": "com.aaichyaagavat.staff"
     },
     "android": {
+      "newArchEnabled": false,
       "package": "com.aaichyaagavat.staff",
       "adaptiveIcon": {
         "backgroundColor": "#C0272D",
@@ -29,7 +30,19 @@
     "plugins": [
       "expo-router",
       "expo-status-bar",
-      "expo-splash-screen"
-    ]
+      "expo-splash-screen",
+      [
+        "expo-notifications",
+        {
+          "sounds": []
+        }
+      ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "68faf3d4-fdf4-4ac5-a913-ebcd1494ef00"
+      }
+    }
   }
 }
